@@ -29,9 +29,9 @@ struct link filemap [max_file_count];
  */
 struct block *blocks;
 
-FILE *fs_info;
-FILE *fs_data;
 char *fs_name = 0;
+char *name_data = 0;
+char *name_info = 0;
 
 char *info_ext = ".info";
 char *data_ext = ".data";
@@ -41,11 +41,11 @@ void FS_mount(char *file_name){
     fs_name = calloc(20, sizeof(char));
     strcpy(fs_name, file_name);
     
-    char *buffer = FS_catStrings(file_name, info_ext);
-    fs_info = fopen(buffer, "rb");
-    free(buffer);
+    name_info = FS_catStrings(file_name, info_ext);
+    name_data = FS_catStrings(file_name, data_ext);
     
-    if(!fs_info){
+    FILE* fs_info = fopen(name_info, "rb");
+    if(fs_info == NULL){
         FS_save_FS(file_name);
     }
     FS_open_FS(file_name);
@@ -316,11 +316,9 @@ void FS_truncate(char *file_name, int size){
 
 /* Внутрішні функції*/
 
-void FS_save_FS(char *fs_name){
+void FS_save_FS(){
 
-    char *buffer = FS_catStrings(fs_name, info_ext);
-    fs_info = fopen(buffer, "wb");
-    free(buffer);
+    FILE *fs_info = fopen(name_info, "wb");
 
     fwrite(&blockmap ,sizeof(char), block_count, fs_info);
 
@@ -329,11 +327,9 @@ void FS_save_FS(char *fs_name){
     fwrite(&descmap ,sizeof(struct descriptor), desc_count, fs_info);
     
     fwrite(&filemap ,sizeof(struct link), max_file_count, fs_info);
-    
-    
-    buffer = FS_catStrings(fs_name, data_ext);
-    fs_data= fopen(buffer, "wb");
-    free(buffer);    
+
+    FILE *fs_data= fopen(name_data, "wb");
+
 
     if(blocks == NULL){
         blocks = calloc(block_count,sizeof(struct block));
@@ -347,9 +343,7 @@ void FS_save_FS(char *fs_name){
 
 
 void FS_open_FS(char *file_name){
-    char *buffer = FS_catStrings(file_name, info_ext);
-    fs_info = fopen(buffer, "rb");
-    free(buffer);
+    FILE *fs_info = fopen(name_info, "rb");
     
     fread(blockmap ,sizeof(char), block_count, fs_info);
 
@@ -361,9 +355,8 @@ void FS_open_FS(char *file_name){
     
     fclose(fs_info);
     
-    buffer = FS_catStrings(file_name, data_ext);
-    fs_data = fopen(buffer, "rb");
-    free(buffer);   
+
+    FILE *fs_data= fopen(name_data, "rb"); 
     
     blocks = malloc(sizeof(struct block)*block_count);
     
@@ -417,4 +410,51 @@ int FS_findFID(char* file_name){
         }
     }
     return -1;
+}
+
+
+void FS_write_block(int nblock, char* data){
+    if(nblock > block_count-1){
+        printf("Out of blocks");
+        return;
+    }
+    
+    FILE *fs_data= fopen(name_data, "rb+"); 
+    
+    int status = fseek(fs_data, nblock*block_count, SEEK_SET);
+    if(status != 0){
+        printf("Error %d", status);
+        return;
+    }
+    
+    status = fwrite(data, sizeof(char), block_size, fs_data);
+    if(status != block_size){
+        printf("Writed not all data");
+        return;
+    }
+        
+    fclose(fs_data);
+}
+
+void FS_read_block(int nblock, char* data){
+    if(nblock > block_count-1){
+        printf("Out of blocks");
+        return;
+    }
+    
+    FILE *fs_data= fopen(name_data, "rb+"); 
+    
+    int status = fseek(fs_data, nblock, SEEK_SET);
+    if(status != 0){
+        printf("Error %d", status);
+        return;
+    }
+    
+    status = fread(data, sizeof(char), block_size, fs_data);
+    if(status != block_size){
+        printf("Writed not all data");
+        return;
+    }
+        
+    fclose(fs_data);
 }

@@ -91,7 +91,7 @@ void FS_truncate(char *file_name, int size);
 /**
  * Створити файл - файлову систему  
  */
-void FS_save_FS(char *file_name);
+void FS_save_FS();
 
 /**
  * Відкрити файлову систему
@@ -118,3 +118,16 @@ void FS_expandFile(int file_id, int offset, int length);
  * @return числовий дексриптор, або -1 одиницю у випадку відсутності
  */
 int FS_findFID(char* file_name);
+/**
+ * Записати інформацію в блок за номером
+ * @param nblock номер
+ * @param data інформацію
+ */
+void FS_write_block(int nblock, char *data);
+/**
+ * Прочитати інформацію в блок за номером
+ * @param nblock номер
+ * @param data інформацію
+ */
+void FS_read_block(int nblock, char *data);
+
