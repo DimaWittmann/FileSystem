@@ -4,365 +4,230 @@
 #include <math.h>
 #include "FileSystem.h"
 
-/**
- * Карта занятості блоків
- */
-unsigned char blockmap [block_size];
+//TODO все дуже страшно, реалізувати доп процедури для пошуку файлів в директорій
+//TODO запис даних відразу в декілька блоків
+//TODO розділити на декілька файлів
+char blockmap [blockmap_size];
 
-/**
- * Відображення числових дескрипторів відкритим файлам
- */
-int open_filesmap [max_opened_files];
-
-/**
- * Карта дескрипторів
- */
-struct descriptor descmap [desc_count];
-
-/**
- * Карта створених файлів
- */
-struct link filemap [max_file_count];
-
-/**
- * Посилання на блоки
- */
-struct block *blocks;
-
-char *fs_name = 0;
-char *name_data = 0;
-char *name_info = 0;
-
-char *info_ext = ".info";
-char *data_ext = ".data";
+struct descriptor root;
+struct descriptor *curr_dir;
+char *fs_name = "D:\\fs";
 
 
-void FS_mount(char *file_name){
-    fs_name = calloc(20, sizeof(char));
-    strcpy(fs_name, file_name);
+
+void FS_mount(){
+    FILE *fs = fopen(fs_name, "rb");
     
-    name_info = FS_catStrings(file_name, info_ext);
-    name_data = FS_catStrings(file_name, data_ext);
+    fread(&blockmap, sizeof(char), blockmap_size, fs);
+    fread(&root, sizeof(struct descriptor), 1, fs);
+    curr_dir = &root;
     
-    FILE* fs_info = fopen(name_info, "rb");
-    if(fs_info == NULL){
-        FS_save_FS(file_name);
-    }
-    FS_open_FS(file_name);
+    fclose(fs);
 }
 
 
 
 void FS_unmount(){
-    if (fs_name == 0){
-        printf("FS is not mounted\n");
-    }else{
-        FS_save_FS(fs_name);
-        free(fs_name);
-        fs_name = 0;
-    }
-    memset(&blockmap,0,sizeof(char)*block_size);
-    memset(&open_filesmap,0,sizeof(int)*max_opened_files);
-    memset(&descmap,0,sizeof(struct descriptor)*desc_count);
-    memset(&filemap,0,sizeof(struct link )*max_file_count);
+    FILE *fs = fopen(fs_name, "rb+");
     
+    fwrite(&blockmap, sizeof(char), blockmap_size, fs);
+    fwrite(&root, sizeof(struct descriptor), 1, fs);
+    
+    fclose(fs);
+}
+
+void FS_mkdir(char* file_name){
+    struct descriptor dot[2];
+    
+    dot[0].attributes = 0x2;
+    memset(&dot[0].name,0 ,8);
+    int i;
+    for(i=0; i<8; i++){
+        if(file_name[i] != 0){
+            dot[0].name[i] = file_name[i];
+        }else{
+            break;
+        }
+    }
+    dot[0].block = 0;
+    dot[0].block2 = 0;
+    dot[0].size = 0;
+    
+
+    dot[1].attributes = root.attributes;
+    memset(&dot[1].name,0 ,8);
+    dot[1].name[0] = '.';
+    dot[1].name[1] = '.';
+    dot[1].block = root.block;
+    dot[1].block2 = root.block2;
+    dot[1].size = root.size;
+    
+    FS_truncate(&dot[0], sizeof(struct descriptor)*2);
+    
+    FS_write_block(dot[0].block, dot, 0, sizeof(struct descriptor)*2);
+    
+    //TODO реалізувати для файлів більше одного блоку
+    int old_size = curr_dir->size;
+    if(curr_dir->size + sizeof(struct descriptor) < block_size){
+        FS_truncate(curr_dir, old_size+sizeof(struct descriptor));
+        for(i = old_size; i<old_size+sizeof(struct descriptor);i++){
+            FS_write_block(curr_dir->block, &dot[0], old_size, sizeof(struct descriptor));
+        }
+    }
 }
 
 
-
-void FS_filestat(int id){
-    printf("N %d: type: %d links: %d size: %d \n", id, descmap[id].type, descmap[id].link_count, descmap[id].size);
-}
 
 void FS_ls(){
-    int i;
-    for(i=0;i<max_file_count;i++){
-        if(filemap[i].file_name[0] != 0){
-            printf("file: %s, desc: %d\n", filemap[i].file_name, filemap[i].desc_id);
-        }
-    }
+    
 }
-
+//TODO об'єднати, позбавитися повторюваного коду
 void FS_create(char* file_name){
+    struct descriptor dot[2];
     
-    if(FS_findFID(file_name)> -1){
-        fprintf(stderr, "%s is existing\n", file_name);
-        return;
-    }
-    
-    int i = 0;
-    while(i < desc_count){
-        if(descmap[i].type == 0){
+    dot[0].attributes = 0x1;
+    memset(&dot[0].name,0 ,8);
+    int i;
+    for(i=0; i<8; i++){
+        if(file_name[i] != 0){
+            dot[0].name[i] = file_name[i];
+        }else{
             break;
         }
-        i++;
     }
+    dot[0].block = 0;
+    dot[0].block2 = 0;
+    dot[0].size = 0;
     
-    if(i == desc_count){
-        fprintf(stderr, "All descriptors are employed\n");
-        return;
-    }
-    int j = 0;
-    while(j < max_file_count){
-        if(filemap[j].file_name[0] == 0){
-            break;
+    //TODO реалізувати для файлів більше одного блоку
+    int old_size = curr_dir->size;
+    if(curr_dir->size + sizeof(struct descriptor) < block_size){
+        FS_truncate(curr_dir, old_size+sizeof(struct descriptor));
+        for(i = old_size; i<old_size+sizeof(struct descriptor);i++){
+            FS_write_block(curr_dir->block, &dot[0], old_size, sizeof(struct descriptor));
         }
-        j++;
     }
-    if(j == max_file_count){
-        fprintf(stderr, "Can`t create files more. Delete old files\n");
-        return;
-    }
-    
-    strcpy(&filemap[j].file_name, file_name);
-    filemap[j].desc_id = i; 
-    descmap[i].type = 1;
-    descmap[i].link_count = 1;
-}
-
-int FS_open(char* file_name){
-    
-    int file_i = 0;
-    for(file_i=0;file_i<max_file_count;file_i++){
-        if(!strcmp(filemap[file_i].file_name, file_name)){
-            break;
-        }
-
-    }
-    
-    int open_file_i = 0;
-    while (open_file_i < max_opened_files){
-        if(open_filesmap[open_file_i] == 0){
-            break;
-        }
-        open_file_i++;
-    }
-    open_filesmap[open_file_i] = file_i+1;    //щоб виділяти дескриптор на нульовий файл
-    
-    return open_file_i;
-}
-
-void FS_close(int id){
-    open_filesmap[id] = 0;   
 }
 
 
-void FS_write(int fd, int offset, int length, unsigned char* data){
-    int file_id = open_filesmap[fd]-1;                  //див open()
-    if(filemap[file_id].file_name[0] == 0){
-        fprintf(stderr, "Can`t find file\n");
-        return;
+
+void FS_write(char* file_name, int offset, int length, unsigned char* data){
+    
+    
+    //TODO виділити окрему функцію пошуку 
+    int block = curr_dir->block;
+    void *df = calloc(block_size, 1);
+    FS_read_block(block, df);
+    int nfiles = curr_dir->size/sizeof(struct descriptor);
+    
+    int i;
+    for(i=0; i<nfiles;i++){
+        if(!strncmp(((struct descriptor*)df)[i].name, file_name, 4)){
+            FS_truncate(&((struct descriptor*)df)[i], offset+length);
+            FS_write_block(((struct descriptor*)df)[i].block, data, offset, length);
+            break;
+        }
     }
     
-    int offset_in_block = offset;
-    int curr_block = 0;
-    while (offset_in_block > block_size){
-        curr_block++;
-        offset_in_block -= block_size;
-    }
-    
-    FS_expandFile(file_id, offset, length);
-    
-    while (length > 0){
-        int i = 0;
-        int curr_block_id = descmap[filemap[file_id].desc_id].map.blocks[curr_block]-1; //додата 1 при віділенні блоку
-        while(offset_in_block < block_size){
-            blocks[curr_block_id].data[offset_in_block] = data[i];
-            offset_in_block++;
-            i++;
-            length--;
-            if(length == 0){
-                break;
+}
+
+unsigned char* FS_read(char* file_name, int offset, int length){
+    //TODO implement!)
+}
+
+void FS_truncate(struct descriptor *file, int size){
+    int old_size = file->size;
+
+    if(old_size == 0){
+        int block_number = size/block_size + 1;
+        file->block = FS_get_free_block();
+        FS_set_block_status(file->block, 1);
+        block_number--;
+        
+        if(block_number > 0){
+            file->block2 = FS_get_free_block();
+            FS_set_block_status(file->block2, 1);
+            
+            int i = 0;
+            for(i=0; i<block_number;i++){
+                char new_block = FS_get_free_block();
+                FS_set_block_status(new_block, 1);
+                FS_write_block_char(file->block2, new_block, i);
             }
         }
-        
-        offset_in_block = 0;
-        curr_block++ ;
-    }
-    
-}
-
-unsigned char* FS_read(int fd, int offset, int length){
-    int file_id = open_filesmap[fd]-1;                  //див open()
-    if(filemap[file_id].file_name[0] == 0){
-        fprintf(stderr, "Can`t find file\n");
+        file->size = size;
         return;
-    }
-    
-    int offset_in_block = offset;
-    int curr_block = 0;
-    while (offset_in_block > block_size){
-        curr_block++;
-        offset_in_block -= block_size;
-    }
-    
-    unsigned char* data = calloc(length, sizeof(unsigned char));
-    
-    while (length > 0){
-        int i = 0;
-        int curr_block_id = descmap[filemap[file_id].desc_id].map.blocks[curr_block]-1; //додата 1 при віділенні блоку
-        while(offset_in_block < block_size){
-            data[i] = blocks[curr_block_id].data[offset_in_block];
-            offset_in_block++;
-            i++;
-            length--;
-            if(length == 0){
-                break;
-            }
-        }
-        
-        offset_in_block = 0;
-        curr_block++ ;
-    }
-    return data;
-    
-}
-
-void FS_link(char *existing_file, char *new_file){
-    int file_id = FS_findFID(existing_file);
-    if(file_id < 0){
-        fprintf(stderr, "%s is not existing\n", existing_file);
-        return;
-    }
-    
-    if(FS_findFID(new_file) > -1){
-        fprintf(stderr, "%s is existing\n", new_file);
-        return;
-    }
-    
-    int j = 0;
-    while(j < max_file_count){
-        if(filemap[j].file_name[0] == 0){
-            break;
-        }
-        j++;
-    }
-    if(j == max_file_count){
-        fprintf(stderr, "Can`t create files more. Delete old files\n");
-        return;
-    }
-    strcpy(&filemap[j].file_name, new_file);
-    
-    int desc_id = filemap[file_id].desc_id;
-    filemap[j].desc_id = desc_id; 
-    descmap[desc_id].link_count++;
-}
-
-
-void FS_unlink(char *file_name){
-    int file_id = FS_findFID(file_name);
-    if(file_id < 0){
-        fprintf(stderr, "%s is not existing\n", file_name);
-        return;
-    }
-    int desc_id = filemap [file_id].desc_id;
-    
-    filemap [file_id].desc_id = 0;
-    int i =0;
-    for(i=0;i<file_name_length;i++){
-        filemap[file_id].file_name[i]=0;
-    }
-    descmap[desc_id].link_count--;
-    if(descmap[desc_id].link_count == 0){
-        int i;
-        for (i=0;i<file_block_count;i++){
-            int block_id = descmap[desc_id].map.blocks[i]-1;
-            if (block_id >= 0){
-                blockmap[block_id] = 0;
-                descmap[desc_id].map.blocks[i] = 0;
-            }
-        }
-        descmap[desc_id].size = 0;
-        descmap[desc_id].type = 0;
-        
-    }
-}
-
-
-
-void FS_truncate(char *file_name, int size){
-    int file_id = FS_findFID(file_name);
-    if(file_id < 0){
-        fprintf(stderr, "%s is not existing\n", file_name);
-        return;
-    }
-    
-    int desc_id = filemap[file_id].desc_id;
-    int old_size = descmap[desc_id].size;
-    if(old_size < size){
-        FS_expandFile(file_id, 0, size);
     }else{
-        int new_block_count = ceil((double)size/block_size);
-        int old_block_count = ceil((double)old_size/block_size);
-        if(new_block_count > 4){
-            fprintf(stderr, "Can`t find file\n");
+        if(old_size/block_size == size/block_size){
+            file->size = size;
             return;
+        }else{
+            //TODO реалізувати для зміни розміру файлу
         }
-        if(new_block_count < old_block_count){
-            int i = old_block_count;
-            while(new_block_count<i){
-                int block_id = descmap[filemap[file_id].desc_id].map.blocks[i]-1;
-                if(block_id >0){
-                    blockmap[block_id] = 0;
-                    descmap[desc_id].map.blocks[i] = 0;
-                }
-                i--;
-            }
-        }
-        descmap[filemap[file_id].desc_id].size = size;
     }
+    
 }
+
 
 
 /* Внутрішні функції*/
 
-void FS_save_FS(){
 
-    FILE *fs_info = fopen(name_info, "wb");
-
-    fwrite(&blockmap ,sizeof(char), block_count, fs_info);
-
-    fwrite(&open_filesmap ,sizeof(int), max_opened_files, fs_info); 
+void FS_init(){
     
-    fwrite(&descmap ,sizeof(struct descriptor), desc_count, fs_info);
+    FILE *fs = fopen(fs_name, "wb");
     
-    fwrite(&filemap ,sizeof(struct link), max_file_count, fs_info);
-
-    FILE *fs_data= fopen(name_data, "wb");
-
-
-    if(blocks == NULL){
-        blocks = calloc(block_count,sizeof(struct block));
-    }
     
-    fwrite(blocks, sizeof(struct block), block_count, fs_data);
+    FS_set_block_status(0, 1);
+    fwrite(&blockmap, sizeof(char), blockmap_size, fs);
+    fwrite(&root, sizeof(struct descriptor), 1, fs);
+    
+    void *block = calloc(block_count, block_size);
+    memset(block, 0x0, block_count*block_size);
+    fwrite(block, block_size, block_count, fs);
+    free(block);
+    fclose(fs);  
+    
+    void * data = calloc(sizeof(char), block_size);
+    memset(data ,0xFF, block_size);
+    FS_write_block(0, data, 0, block_size);
+    
+      
+    
+    FS_mount();
+    
+    root.attributes = 0x2;
+    memset(&root.name,0 ,8);
+    root.name[0] = 'r';
+    root.name[1] = 'o';
+    root.name[2] = 'o';
+    root.name[3] = 't';
+    root.block = 0;
+    root.block2 = 0;
+    root.size = 0;
 
-    fclose(fs_data);
-    fclose(fs_info);
+    FS_truncate(&root, sizeof(struct descriptor)*2);
+    
+    struct descriptor dot[2];
+    
+    FS_copy_descriptors(&root, &dot[0]);
+
+    dot[1].attributes = root.attributes;
+    memset(&dot[1].name,0 ,8);
+    dot[1].name[0] = '.';
+    dot[1].name[1] = '.';
+    dot[1].block = root.block;
+    dot[1].block2 = root.block2;
+    dot[1].size = root.size;
+    
+  
+    FS_write_block(root.block, dot, 0, sizeof(struct descriptor)*2);
+    
+    FS_unmount();
+    
 }
 
 
-void FS_open_FS(char *file_name){
-    FILE *fs_info = fopen(name_info, "rb");
-    
-    fread(blockmap ,sizeof(char), block_count, fs_info);
-
-    fread(open_filesmap ,sizeof(int), max_opened_files, fs_info); 
-    
-    fread(descmap ,sizeof(struct descriptor), desc_count, fs_info);
-    
-    fread(filemap ,sizeof(struct link), max_file_count, fs_info);
-    
-    fclose(fs_info);
-    
-
-    FILE *fs_data= fopen(name_data, "rb"); 
-    
-    blocks = malloc(sizeof(struct block)*block_count);
-    
-    fread(blocks, sizeof(struct block), block_count, fs_data);
-    fclose(fs_data);
-}
 
 char *FS_catStrings(const char* str1, const char *str2 ){
     char *buffer = calloc(strlen(str1)+strlen(str2)+1,sizeof(char));
@@ -371,68 +236,49 @@ char *FS_catStrings(const char* str1, const char *str2 ){
     return buffer;
 }
 
-void FS_expandFile(int file_id, int offset, int length){
-    int new_size = offset + length;
-    int old_size = descmap[filemap[file_id].desc_id].size; 
-    if(old_size < new_size){
-        int new_block_count = ceil((double)new_size/block_size);
-        int old_block_count = ceil((double)old_size/block_size);
-        if(new_block_count > 4){
-            fprintf(stderr, "Can`t find file\n");
-            return;
-        }
-        if(new_block_count > old_block_count){
-            int i = old_block_count;
-            do{
-                int addr_new_block = 0;
-                while(blockmap[addr_new_block] ){
-                    addr_new_block++;
-                    if(addr_new_block == block_count){
-                        fprintf(stderr, "Can`t find free block\n");
-                        return;
-                    }
-                }
-                descmap[filemap[file_id].desc_id].map.blocks[i] = addr_new_block + 1; //щоб відокремити не зайняті блоки
-                blockmap[addr_new_block] = 1;
-                i++;
-            }while (i < new_block_count);
-        }
-        descmap[filemap[file_id].desc_id].size = new_size;
-    }
-}
-
-int FS_findFID(char* file_name){
-    int i;
-    
-    for(i=0; i< max_file_count;i++){
-        if(!strcmp(filemap[i].file_name, file_name)){
-            return i;
-        }
-    }
-    return -1;
-}
-
-
-void FS_write_block(int nblock, char* data){
+void FS_write_block(int nblock, char *data,int start, int count){
     if(nblock > block_count-1){
         printf("Out of blocks");
         return;
     }
     
-    FILE *fs_data= fopen(name_data, "rb+"); 
+    FILE *fs_data= fopen(fs_name, "rb+"); 
     
-    int status = fseek(fs_data, nblock*block_count, SEEK_SET);
+    int status = fseek(fs_data, start+blockmap_size+sizeof(struct descriptor)+nblock*block_size, SEEK_SET);
     if(status != 0){
         printf("Error %d", status);
         return;
     }
     
-    status = fwrite(data, sizeof(char), block_size, fs_data);
-    if(status != block_size){
+    status = fwrite(data, sizeof(char), count, fs_data);
+    if(status != count){
         printf("Writed not all data");
         return;
     }
         
+    fclose(fs_data);
+}
+
+void FS_write_block_char(int nblock, char data, int pos){
+    if(nblock > block_count-1){
+        printf("Out of blocks");
+        return;
+    }
+    if(pos > block_size-1){
+        printf("Position of block");
+        return;
+    }
+    
+    FILE *fs_data= fopen(fs_name, "rb+"); 
+    
+    int status = fseek(fs_data, blockmap_size+sizeof(struct descriptor)+nblock*block_size + pos, SEEK_SET);
+    if(status != 0){
+        printf("Error %d", status);
+        return;
+    }
+    
+    fwrite(&data, sizeof(char), 1, fs_data);
+
     fclose(fs_data);
 }
 
@@ -442,9 +288,9 @@ void FS_read_block(int nblock, char* data){
         return;
     }
     
-    FILE *fs_data= fopen(name_data, "rb+"); 
+    FILE *fs_data= fopen(fs_name, "rb+"); 
     
-    int status = fseek(fs_data, nblock, SEEK_SET);
+    int status = fseek(fs_data,blockmap_size+sizeof(struct descriptor)+ nblock*block_size, SEEK_SET);
     if(status != 0){
         printf("Error %d", status);
         return;
@@ -457,4 +303,103 @@ void FS_read_block(int nblock, char* data){
     }
         
     fclose(fs_data);
+}
+
+
+int FS_read_block_int(int nblock, int pos){
+    if(nblock > block_count-1){
+        printf("Out of blocks");
+        return;
+    }
+    if(pos > block_size-1){
+        printf("Position of block");
+        return;
+    }
+    
+    FILE *fs_data= fopen(fs_name, "rb+"); 
+    
+    int status = fseek(fs_data, blockmap_size+sizeof(struct descriptor)+nblock*block_size + pos, SEEK_SET);
+    if(status != 0){
+        printf("Error %d", status);
+        return;
+    }
+    int data;
+    fread(&data, sizeof(int), 1, fs_data);
+
+    fclose(fs_data);
+    return data;
+}
+
+
+char FS_block_status(int nblock){
+    if(nblock > block_count-1){
+        printf("Out of blocks");
+        return;
+    }
+    
+    
+    char byte = nblock/8 - 1; 
+    char bit = nblock%8 - 1;
+    
+    unsigned char mask = 0x1;
+    mask = mask << bit;
+    
+    mask = mask & blockmap[byte];
+    
+    return mask;
+}
+
+void FS_set_block_status(int nblock, char status){
+    if(nblock > block_count-1){
+        printf("Out of blocks");
+        return;
+    }
+    
+    
+    char byte = nblock/8; 
+    char bit = nblock%8;
+    
+    if(status&0xFF != 0){
+        status = 0x1;
+    }else{
+        status = 0x0;
+    }
+    
+    status = status << bit;
+    
+    blockmap[byte] = status | blockmap[byte];
+}
+
+
+
+unsigned char FS_get_free_block(){
+    int i = 0;
+    while(blockmap[i] == 0xFF){
+        i++;
+        if(i == blockmap_size){
+            printf("All block occupied");
+            return;
+        }
+    }
+    
+    unsigned char j = 0;
+    unsigned char bit = 0x1;
+    while (bit & blockmap[i]){
+        bit = bit << 1;
+        j++;
+    }
+    
+    return i*8 + j;
+    
+}
+
+void FS_copy_descriptors(struct descriptor *desc, struct descriptor *new_desc){
+    new_desc->attributes = desc->attributes;
+    int i;
+    for(i=0;i<8;i++){
+        new_desc->name[i] = desc->name[i];
+    }
+    new_desc->block = desc->block;
+    new_desc->block2 = desc->block2;
+    new_desc->size = desc->size;
 }

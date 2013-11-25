@@ -1,44 +1,26 @@
-#define block_size 16
-#define block_count 16
+#define block_size 0x80
+#define block_count 0x100
 #define fs_size block_size*block_count
 
 #define file_name_length 8
-#define file_block_count 4
-#define max_file_size file_block_count*block_size
 
-#define max_opened_files 8
+#define blockmap_size 64
+#define desc_count 32
 
-#define blockmap_size block_count/32
-#define desc_count 16
-
-#define max_file_count desc_count*2
-
-struct block{
-    unsigned char data[block_size];
-};
-
-struct blockmap{
-    int blocks[file_block_count];
-};
 
 struct descriptor{
-    int type;  //0 - невизначений, 1 -файл, 2 - директорія
-    int link_count;
+    char name[8];
+    char block;
+    char block2;
+    char attributes;
     int size;
-    struct blockmap map;
 };
 
-
-struct link{
-    char file_name[file_name_length+1];
-    int desc_id;
-};
- 
 
 /**
  * Підключити файлову систему, збережену на диску
  */
-void FS_mount (char* file_name);
+void FS_mount ();
 void FS_unmount();
 
 /**
@@ -56,13 +38,7 @@ void FS_ls();
  */
 void FS_create(char *file_name);
 
-/**
- * Відкрити файл для роботи
- * @param file_name
- * @return числовий дексриптор для роботи з цим файлом
- */
-int FS_open(char *file_name);
-void FS_close(int id);
+void FS_mkdir(char *file_name);
 
 /**
  * Прочитати дані з файлв
@@ -70,64 +46,44 @@ void FS_close(int id);
  * @param offset 
  * @param length
  */
-unsigned char* FS_read(int fd, int offset, int length);
-void FS_write(int fd, int offset, int length, unsigned char* data);
+unsigned char* FS_read(char* file_name, int offset, int length);
+void FS_write(char* file_name, int offset, int length, unsigned char* data);
 
-/**
- * Створення посилання на існуючий файл
- * @param existing_file
- * @param new_file
- */
-void FS_link(char *existing_file, char *new_file);
-void FS_unlink(char *file_name);
 /**
  * Змінити розмір файлу
  * @param file_name
  * @param size
  */
-void FS_truncate(char *file_name, int size);
+void FS_truncate(struct descriptor *file, int size);
 
 /* Внутрішні функції*/
 /**
  * Створити файл - файлову систему  
  */
-void FS_save_FS();
+void FS_init();
 
-/**
- * Відкрити файлову систему
- */
-void FS_open_FS(char *file_name);
 
-/**
- * Об'єднування двох String
- * @param str1 
- * @param str2
- * @return
- */
-char *FS_catStrings(const char *str1, const char *str2);
-/**
- * Розширити файл для можливості запису нової інформації
- * @param file_id
- * @param offset
- * @param length
- */
-void FS_expandFile(int file_id, int offset, int length);
-/**
- * Пошук номер файлу за іменем файлу в таблиці імен файлів
- * @param file_name
- * @return числовий дексриптор, або -1 одиницю у випадку відсутності
- */
 int FS_findFID(char* file_name);
 /**
  * Записати інформацію в блок за номером
  * @param nblock номер
  * @param data інформацію
  */
-void FS_write_block(int nblock, char *data);
+void FS_write_block(int nblock, char *data,int start, int count);
+void FS_write_block_char(int nblock, char data, int pos);
 /**
  * Прочитати інформацію в блок за номером
  * @param nblock номер
  * @param data інформацію
  */
 void FS_read_block(int nblock, char *data);
+int FS_read_block_int(int nblock, int pos);
 
+char FS_block_status(int nblock);
+
+void FS_set_block_status(int nblock, char status);
+
+unsigned char FS_get_free_block();
+
+
+void FS_copy_descriptors(struct descriptor *desc, struct descriptor *new_desc);
